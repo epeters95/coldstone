@@ -19,21 +19,27 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.login(process.env.DISCORD_TOKEN);
 
-client.on("messageCreate", async (message) => {
+client.on("messageCreate", async (userMsg) => {
 
-    if (message.author.bot) return;
+    // Skip generation if bot or not mentioned
 
-    if (!message.mentions.has(client.user)) return;
+    if (userMsg.author.bot) return;
+    if (!userMsg.mentions.has(client.user)) return;
 
-    console.log(`Received message: ${message.content}`);
+    console.log(`Received message: ${userMsg.content}`);
 
     // Generate reply
 
-    message.content = message.content.replace(/@\d+/g, "");
+    userMsgText = userMsg.content.replace(/@\d+/g, "");
 
     let reply = await ollama.chat({
         model: "llama3.2",
-        messages: [{role: "user", content: message.content }]
+        messages: [
+            {
+                role: "user",
+                content: userMsgText
+            }
+        ]
     });
 
     console.log(`Generated reply: ${reply.message.content}`);
