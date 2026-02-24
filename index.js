@@ -44,5 +44,5 @@ client.on("messageCreate", async (userMsg) => {
 
     console.log(`Generated reply: ${reply.message.content}`);
     
-    message.reply(reply.message.content);
+    userMsg.reply(reply.message.content);
 });
