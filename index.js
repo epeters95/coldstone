@@ -39,33 +39,34 @@ client.on("messageCreate", async (userMsg) => {
 
     userMsgText = userMsg.content.replace(/@\d+/g, "");
 
+    // Initialize chat history
+
+    if (typeof userMessageHistory[userMsg.author] === "undefined") {
+        userMessageHistory[userMsg.author] = [];
+    }
+    userMessageHistory[userMsg.author].push(
+    {
+        role: "user",
+        content: userMsgText
+    })
+
     try {
+
         let reply = await ollama.chat({
             model: "llama3.2",
-            messages: [
-                {
-                    role: "user",
-                    content: userMsgText
-                }
-            ]
+            messages: userMessageHistory[userMsg.author]
         });
 
         console.log(`Generated reply: ${reply.message.content}`);
         
-        // Send reply 
+        // Send reply
         userMsg.reply(reply.message.content);
-
+        
         // Add to history
-        if (typeof userMessageHistory[userMsg.author] === "undefined") {
-            userMessageHistory[userMsg.author] = [];
-        }
-        userMessageHistory[userMsg.author].push({
-            "role": "user",
-            "content": userMsgText
-        });
-        userMessageHistory[userMsg.author].push({
-            "role": "assistant",
-            "content": reply.message.content
+        userMessageHistory[userMsg.author].push(
+        {
+            role: "assistant",
+            content: reply.message.content
         });
 
     } catch (error) {
