@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import ollama from 'ollama';
+import fs from 'node:fs';
 
 dotenv.config();
 
@@ -58,7 +59,7 @@ client.on("messageCreate", async (userMsg) => {
         });
 
         console.log(`Generated reply: ${reply.message.content}`);
-        
+
         // Send reply
         userMsg.reply(reply.message.content);
         
@@ -68,6 +69,9 @@ client.on("messageCreate", async (userMsg) => {
             role: "assistant",
             content: reply.message.content
         });
+
+        fs.writeFile('chat_history.json', JSON.stringify(userMessageHistory, null, 4), 'utf8');
+});
 
     } catch (error) {
         console.error("Failed to generate message:", error);
