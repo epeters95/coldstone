@@ -17,6 +17,10 @@ const client = new Client({
 const userMessageHistory = Object.create(null);
 const LOCAL_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
 const MAX_WEB_RESULTS = Number(process.env.OLLAMA_WEB_MAX_RESULTS || 5);
+const DISCORD_MAX_MESSAGE_CHARS = 2000;
+
+const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
+
 const cloudOllama = process.env.OLLAMA_API_KEY
     ? new Ollama({
         host: process.env.OLLAMA_CLOUD_HOST || 'https://ollama.com',
@@ -36,6 +40,16 @@ function shouldUseWebSearch(text) {
         /\b(search|look up|find online|web search|google)\b/.test(lower) ||
         /\b(latest|current|today|news|recent|up[- ]to[- ]date)\b/.test(lower)
     );
+}
+
+function limitForDiscord(text) {
+    const normalized = String(text ?? '').trim();
+    if (normalized.length <= DISCORD_MAX_MESSAGE_CHARS) {
+        return normalized;
+    }
+
+    const headLimit = Math.max(DISCORD_MAX_MESSAGE_CHARS - TRUNCATION_SUFFIX.length, 1);
+    return `${normalized.slice(0, headLimit).trimEnd()}${TRUNCATION_SUFFIX}`;
 }
 
 function formatWebSearchContext(searchResponse) {
@@ -140,6 +154,7 @@ client.on('messageCreate', async (userMsg) => {
             replyText = `${webSearchWarning}\n\n${replyText}`;
         }
 
+        replyText = limitForDiscord(replyText);
         console.log(`Generated reply: ${replyText}`);
 
         await userMsg.reply(replyText);
