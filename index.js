@@ -121,6 +121,13 @@ async function getWebSearchContext(query) {
         };
     }
 
+    if (!query) {
+        return {
+            warning: 'Web search requested, but query is empty. Replying without web search.',
+            context: null,
+        };
+    }
+
     const searchResponse = await cloudOllama.webSearch({
         query,
         max_results: Math.min(Math.max(MAX_WEB_RESULTS, 1), 10),
@@ -132,7 +139,9 @@ async function getWebSearchContext(query) {
     };
 }
 
-function parseFunctionCall(responseText) {
+
+async function extractDetailsAndCallFunction(responseText) {
+
     const trimmed = String(responseText ?? '').trim();
     const match = trimmed.match(/^<function=([A-Za-z_][A-Za-z0-9_]*)>/);
     if (!match) return null;
@@ -141,65 +150,45 @@ function parseFunctionCall(responseText) {
     let argsText = trimmed.slice(match[0].length).trim();
     argsText = argsText.replace(/<\/function>\s*$/i, '').trim();
 
-    if (!argsText) {
-        return { functionName, args: {} };
-    }
-
-    try {
-        const parsedArgs = JSON.parse(argsText);
-        if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
-            return { functionName, args: parsedArgs };
+    const functionMap = {
+        getWebSearchContext: {
+            func: getWebSearchContext,
+            param: "query" //TODO: expand to array
         }
-    } catch (error) {
-        // Fall through and treat unparseable payload as query text.
-    }
+    };
 
-    return { functionName, args: { query: argsText } };
-}
-
-async function extractDetailsAndCallFunction(responseText, functionMap, fallbackQuery) {
-    const parsedCall = parseFunctionCall(responseText);
-    if (!parsedCall) {
+    if (!Object.keys(functionMap).includes(functionName) || !argsText) {
         return {
             warning: 'Function call format was invalid, so I replied without search results.',
             context: null,
         };
     }
 
-    const selectedFunction = functionMap[parsedCall.functionName];
-    if (typeof selectedFunction !== 'function') {
-        return {
-            warning: `Function "${parsedCall.functionName}" is not supported, so I replied without search results.`,
-            context: null,
-        };
-    }
-
-    const parsedQuery = typeof parsedCall.args?.query === 'string'
-        ? parsedCall.args.query.trim()
-        : '';
-    const query = parsedQuery || String(fallbackQuery ?? '').trim();
-
-    if (!query) {
-        return {
-            warning: `Function "${parsedCall.functionName}" was missing a query, so I replied without search results.`,
-            context: null,
-        };
-    }
-
     try {
-        return await selectedFunction(query);
+
+        // Parse JSON (leaves extendable for multiple params)
+        const parsedArgs = JSON.parse(argsText);
+        
+        console.log(`Calling Function "${functionName}" with arguments "${argsText}"`);
+
+        // Lookup the params defined in functionMap and pass to function
+        // Not the best way to do this (arg names not validated, only functionName)
+        // TODO: find different approach
+        result = await functionMap[functionName].func(parsedArgs[functionMap[functionName].param])
+        return result;
+    
     } catch (error) {
-        console.error(`Function "${parsedCall.functionName}" failed:`, error);
+
+        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+            console.error("Wrong argument types");
+        }
+        console.error(`Function "${functionName}" failed:`, error);
         return {
-            warning: `Function "${parsedCall.functionName}" failed, so I replied without search results.`,
+            warning: `Function "${functionName}" failed, so I replied without search results.`,
             context: null,
         };
     }
 }
-
-const functionMap = {
-    getWebSearchContext,
-};
 
 client.once(Events.ClientReady, (readyClient) => {
     console.log(`Ready! Logging in as ${readyClient.user.tag}`);
@@ -245,9 +234,7 @@ client.on('messageCreate', async (userMsg) => {
 
         if (replyText.trimStart().startsWith('<function=')) {
             const functionResult = await extractDetailsAndCallFunction(
-                replyText,
-                functionMap,
-                userMsgText,
+                replyText
             );
             webSearchWarning = functionResult.warning;
             webSearchContext = functionResult.context;
