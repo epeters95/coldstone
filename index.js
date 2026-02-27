@@ -16,8 +16,51 @@ const client = new Client({
 
 const userMessageHistory = Object.create(null);
 const LOCAL_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
-const MAX_WEB_RESULTS = Number(process.env.OLLAMA_WEB_MAX_RESULTS || 5);
+const MAX_WEB_RESULTS = Number(process.env.OLLAMA_WEB_MAX_RESULTS || 4);
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
+const MAX_REPLY_TOKENS = 350;
+
+const SYSTEM_PROMPT = `Cutting Knowledge Date: December 2023
+Today Date: February 26 2026
+
+# Tool Instructions
+- You are a helpful personal assistant.
+- When the user indicates an intent to search and includes any of the words ("search","look up","find online","web search","google","latest","current","today","news","recent", "up to date"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
+- When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request into relevant terms.
+
+You have access to the following functions:
+
+{
+  "name": "getWebSearchContext",
+  "description": "Performs a web search for a single query and returns relevant results.",
+  "parameters": {
+    "query": {
+      "param_type": "string",
+      "description": "the search query string",
+      "required": true
+    },
+  }
+}
+
+
+If a you choose to call a function ONLY reply in the following format:
+<{start_tag}={function_name}>{parameters}{end_tag}
+where
+
+start_tag => \`<function\`
+parameters => a JSON dict with the function argument name as key and function argument value as value.
+end_tag => \`</function>\`
+
+Here is an example,
+<function=example_function_name>{"example_name": "example_value"}</function>
+
+Reminder:
+- When user is asking for a question that requires your reasoning, DO NOT USE OR FORCE a function call
+- Function calls MUST follow the specified format
+- Required parameters MUST be specified
+- Only call one function at a time
+- Put the entire function call reply on one line
+- When returning a function call, don't add anything else to your response`;
 
 const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
 
@@ -34,13 +77,6 @@ function stripBotMention(text) {
     return text.replace(/<@!?\d+>/g, '').trim();
 }
 
-function shouldUseWebSearch(text) {
-    const lower = text.toLowerCase();
-    return (
-        /\b(search|look up|find online|web search|google)\b/.test(lower) ||
-        /\b(latest|current|today|news|recent|up[- ]to[- ]date)\b/.test(lower)
-    );
-}
 
 function limitForDiscord(text) {
     const normalized = String(text ?? '').trim();
@@ -96,6 +132,75 @@ async function getWebSearchContext(query) {
     };
 }
 
+function parseFunctionCall(responseText) {
+    const trimmed = String(responseText ?? '').trim();
+    const match = trimmed.match(/^<function=([A-Za-z_][A-Za-z0-9_]*)>/);
+    if (!match) return null;
+
+    const functionName = match[1];
+    let argsText = trimmed.slice(match[0].length).trim();
+    argsText = argsText.replace(/<\/function>\s*$/i, '').trim();
+
+    if (!argsText) {
+        return { functionName, args: {} };
+    }
+
+    try {
+        const parsedArgs = JSON.parse(argsText);
+        if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+            return { functionName, args: parsedArgs };
+        }
+    } catch (error) {
+        // Fall through and treat unparseable payload as query text.
+    }
+
+    return { functionName, args: { query: argsText } };
+}
+
+async function extractDetailsAndCallFunction(responseText, functionMap, fallbackQuery) {
+    const parsedCall = parseFunctionCall(responseText);
+    if (!parsedCall) {
+        return {
+            warning: 'Function call format was invalid, so I replied without search results.',
+            context: null,
+        };
+    }
+
+    const selectedFunction = functionMap[parsedCall.functionName];
+    if (typeof selectedFunction !== 'function') {
+        return {
+            warning: `Function "${parsedCall.functionName}" is not supported, so I replied without search results.`,
+            context: null,
+        };
+    }
+
+    const parsedQuery = typeof parsedCall.args?.query === 'string'
+        ? parsedCall.args.query.trim()
+        : '';
+    const query = parsedQuery || String(fallbackQuery ?? '').trim();
+
+    if (!query) {
+        return {
+            warning: `Function "${parsedCall.functionName}" was missing a query, so I replied without search results.`,
+            context: null,
+        };
+    }
+
+    try {
+        return await selectedFunction(query);
+    } catch (error) {
+        console.error(`Function "${parsedCall.functionName}" failed:`, error);
+        return {
+            warning: `Function "${parsedCall.functionName}" failed, so I replied without search results.`,
+            context: null,
+        };
+    }
+}
+
+const functionMap = {
+    getWebSearchContext,
+};
+
 client.once(Events.ClientReady, (readyClient) => {
     console.log(`Ready! Logging in as ${readyClient.user.tag}`);
 });
@@ -122,34 +227,49 @@ client.on('messageCreate', async (userMsg) => {
     });
 
     try {
-        const useWebSearch = shouldUseWebSearch(userMsgText);
         let webSearchWarning = null;
         let webSearchContext = null;
 
-        if (useWebSearch) {
-            try {
-                const webSearchResult = await getWebSearchContext(userMsgText);
-                webSearchWarning = webSearchResult.warning;
-                webSearchContext = webSearchResult.context;
-            } catch (error) {
-                console.error('Web search failed:', error);
-                webSearchWarning = 'Web search failed, so I replied without search results.';
-            }
-        }
-
-        const messages = webSearchContext
-            ? [
-                { role: 'system', content: webSearchContext },
-                ...userMessageHistory[userId],
-            ]
-            : userMessageHistory[userId];
-
-        const reply = await ollama.chat({
+        const initialReply = await ollama.chat({
             model: LOCAL_CHAT_MODEL,
-            messages,
+            messages: [
+                { role: 'system', content: SYSTEM_PROMPT },
+                ...userMessageHistory[userId],
+            ],
+            options: {
+                num_predict: MAX_REPLY_TOKENS,
+            },
         });
 
-        let replyText = reply.message.content;
+        let replyText = String(initialReply.message?.content ?? '');
+
+        if (replyText.trimStart().startsWith('<function=')) {
+            const functionResult = await extractDetailsAndCallFunction(
+                replyText,
+                functionMap,
+                userMsgText,
+            );
+            webSearchWarning = functionResult.warning;
+            webSearchContext = functionResult.context;
+
+            const finalMessages = webSearchContext
+                ? [
+                    { role: 'system', content: webSearchContext },
+                    ...userMessageHistory[userId],
+                ]
+                : userMessageHistory[userId];
+
+            const finalReply = await ollama.chat({
+                model: LOCAL_CHAT_MODEL,
+                messages: finalMessages,
+                options: {
+                    num_predict: MAX_REPLY_TOKENS,
+                },
+            });
+
+            replyText = String(finalReply.message?.content ?? '');
+        }
+
         if (webSearchWarning) {
             replyText = `${webSearchWarning}\n\n${replyText}`;
         }
