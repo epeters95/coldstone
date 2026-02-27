@@ -25,7 +25,7 @@ Today Date: February 26 2026
 
 # Tool Instructions
 - You are a helpful personal assistant.
-- When the user indicates an intent to search and includes any of the words ("search","look up","find online","web search","google","latest","current","today","news","recent", "up to date"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
+- When the user includes any of the keywords ("search online","online search","search web","search the web","look up","find online","web search","google","news"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
 - When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request into relevant terms.
 
 You have access to the following functions:
@@ -44,22 +44,15 @@ You have access to the following functions:
 
 
 If a you choose to call a function ONLY reply in the following format:
-<{start_tag}={function_name}>{parameters}{end_tag}
+<function=functionName>{parameters}</function>
 where
-
-start_tag => \`<function\`
-parameters => a JSON dict with the function argument name as key and function argument value as value.
-end_tag => \`</function>\`
-
-Here is an example,
-<function=example_function_name>{"example_name": "example_value"}</function>
+functionName => getWebSearchContext
+parameters => a JSON dict with the function argument name as key and function argument value as value, e.g. {"example_name": "example_value"}
 
 Reminder:
 - When user is asking for a question that requires your reasoning, DO NOT USE OR FORCE a function call
 - Function calls MUST follow the specified format
 - Required parameters MUST be specified
-- Only call one function at a time
-- Put the entire function call reply on one line
 - When returning a function call, don't add anything else to your response`;
 
 const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
@@ -142,9 +135,15 @@ async function getWebSearchContext(query) {
 
 async function extractDetailsAndCallFunction(responseText) {
 
+    console.log("Extracting function text from " + responseText);
     const trimmed = String(responseText ?? '').trim();
     const match = trimmed.match(/^<function=([A-Za-z_][A-Za-z0-9_]*)>/);
-    if (!match) return null;
+    if (!match) {
+        return {
+            warning: 'Function call format was invalid, so I replied without search results.',
+            context: null,
+        }; 
+    }
 
     const functionName = match[1];
     let argsText = trimmed.slice(match[0].length).trim();
@@ -169,6 +168,13 @@ async function extractDetailsAndCallFunction(responseText) {
         // Parse JSON (leaves extendable for multiple params)
         const parsedArgs = JSON.parse(argsText);
         
+        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+            console.error("Wrong argument types");
+            return {
+                warning: `Arguments "${argsText}" were incorrect, so I replied without search results.`,
+                context: null,
+            };
+        }
         console.log(`Calling Function "${functionName}" with arguments "${argsText}"`);
 
         // Lookup the params defined in functionMap and pass to function
@@ -179,9 +185,6 @@ async function extractDetailsAndCallFunction(responseText) {
     
     } catch (error) {
 
-        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
-            console.error("Wrong argument types");
-        }
         console.error(`Function "${functionName}" failed:`, error);
         return {
             warning: `Function "${functionName}" failed, so I replied without search results.`,
