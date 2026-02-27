@@ -15,8 +15,9 @@ const client = new Client({
 });
 
 const userMessageHistory = Object.create(null);
+const CHAT_HISTORY_PATH = 'chat_history.json';
 const LOCAL_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
-const MAX_WEB_RESULTS = Number(process.env.OLLAMA_WEB_MAX_RESULTS || 4);
+const MAX_WEB_RESULTS = 3;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
 
@@ -26,7 +27,7 @@ Today Date: February 26 2026
 # Tool Instructions
 - You are a helpful personal assistant.
 - When the user includes any of the keywords ("search online","online search","search web","search the web","look up","find online","web search","google","news"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
-- When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request into relevant terms.
+- When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request in the context of the conversation.
 
 You have access to the following functions:
 
@@ -51,6 +52,7 @@ parameters => a JSON dict with the function argument name as key and function ar
 
 Reminder:
 - When user is asking for a question that requires your reasoning, DO NOT USE OR FORCE a function call
+- Do not state when a function call is not needed
 - Function calls MUST follow the specified format
 - Required parameters MUST be specified
 - When returning a function call, don't add anything else to your response`;
@@ -83,8 +85,12 @@ function limitForDiscord(text) {
 
 function formatWebSearchContext(searchResponse) {
     if (!searchResponse?.results?.length) {
-        return null;
+        return {
+            warning: `Function "${functionName}" returned empty results.`,
+            context: null,
+        };
     }
+    console.log(`Collected search results: ${JSON.stringify(searchResponse)}`);
 
     const formatted = searchResponse.results.map((result, index) => {
         const snippet = (result.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -195,6 +201,17 @@ async function extractDetailsAndCallFunction(responseText) {
 
 client.once(Events.ClientReady, (readyClient) => {
     console.log(`Ready! Logging in as ${readyClient.user.tag}`);
+
+    // Load chat history
+    try {
+        
+        Object.assign(userMessageHistory, JSON.parse(fs.readFileSync(CHAT_HISTORY_PATH, 'utf8')))
+        
+    } catch (error) {
+        
+        console.error('Error loading history file ' + CHAT_HISTORY_PATH)
+
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN);
@@ -221,6 +238,10 @@ client.on('messageCreate', async (userMsg) => {
     try {
         let webSearchWarning = null;
         let webSearchContext = null;
+        
+        console.log(`Using chat history: ${JSON.stringify(userMessageHistory)}`);
+        
+        // First chat generation (response or function call)
 
         const initialReply = await ollama.chat({
             model: LOCAL_CHAT_MODEL,
@@ -235,19 +256,26 @@ client.on('messageCreate', async (userMsg) => {
 
         let replyText = String(initialReply.message?.content ?? '');
 
+        // Handle function call
+
         if (replyText.trimStart().startsWith('<function=')) {
+
+            // Collect search results
             const functionResult = await extractDetailsAndCallFunction(
                 replyText
             );
-            webSearchWarning = functionResult.warning;
-            webSearchContext = functionResult.context;
-
+            if (functionResult) {
+                webSearchWarning = functionResult.warning;
+                webSearchContext = functionResult.context;
+            }
             const finalMessages = webSearchContext
                 ? [
                     { role: 'system', content: webSearchContext },
                     ...userMessageHistory[userId],
                 ]
                 : userMessageHistory[userId];
+
+            // Generate response from search results
 
             const finalReply = await ollama.chat({
                 model: LOCAL_CHAT_MODEL,
@@ -264,6 +292,8 @@ client.on('messageCreate', async (userMsg) => {
             replyText = `${webSearchWarning}\n\n${replyText}`;
         }
 
+        // Send response in discord chat
+
         replyText = limitForDiscord(replyText);
         console.log(`Generated reply: ${replyText}`);
 
@@ -274,8 +304,10 @@ client.on('messageCreate', async (userMsg) => {
             content: replyText,
         });
 
+        // Save messages to chat history file
+
         await fs.promises.writeFile(
-            'chat_history.json',
+            CHAT_HISTORY_PATH,
             JSON.stringify(userMessageHistory, null, 4),
             'utf8',
         );
