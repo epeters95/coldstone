@@ -34,18 +34,18 @@ const SYSTEM_PROMPT = `
 - When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request in the context of the conversation.
 - IF there are no search keywords, DO NOT CALL A FUNCTION.
 
-You have access to the following functions:
+You have access to the following function:
 
-getWebSearchContext(query)
+- Name: getWebSearchContext(query)
 - Description: Performs a web search for a single query and returns relevant results
 - Parameters: Query (type: string, description: the search query string, required: true)
 
 
-If a you choose to call a function ONLY reply in one of the following formats:
+If you choose to call a function ONLY reply in the following format:
 <function=getWebSearchContext>query</function>
 
 where
-query => String of the search terms
+query => The search terms
 
 Reminder:
 - When user is asking for a question that requires your reasoning, DO NOT USE a function call.
@@ -56,7 +56,7 @@ Reminder:
 const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
 
 function stripBotMention(text) {
-    return text.replace(/<@!?\d+>/g, '').trim();
+    return text.replace(/<@!?&?\d+>/g, '').trim();
 }
 
 function addMessageToHistory(userId, message) {
