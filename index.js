@@ -18,11 +18,11 @@ const client = new Client({
 const LOCAL_CHAT_MODEL = 'llama3.2-10k'; // 'llama16k';
 
 const CHAT_HISTORY_PATH = 'chat_history.json';
-const MAX_WEB_RESULTS = 3;
+const MAX_WEB_RESULTS = 5;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
 const MAX_HISTORY_MESSAGES = 5;
-const SERP_API_KEY = process.env.SERPAPI_API_KEY;
+const SERP_API_KEY = process.env.SERP_API_KEY;
 
 const userMessageHistory = Object.create(null);
 
@@ -88,7 +88,6 @@ function formatWebSearchContext(searchResponse) {
         : [];
 
     if (!organicResults.length) {
-        if (!searchResponse?.results?.length) {
         return {
             warning: `Serp API returned empty results.`,
             context: null,
@@ -106,7 +105,7 @@ function formatWebSearchContext(searchResponse) {
 
     console.log(`Collected search results: ${formatted}`);
     return [
-        `Use the web search results below when answering. These results, dated ${new Date().toDateString()} represent current information beyond your knowledge cutoff date to inform accurate answers.`,
+        `Use the web search results below, dated ${new Date().toDateString()}, when answering. This current information takes priority over your existing knowledge.`,
         '',
         'WEB SEARCH RESULTS',
         formatted,
