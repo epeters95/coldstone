@@ -21,6 +21,7 @@ const CHAT_HISTORY_PATH = 'chat_history.json';
 const MAX_WEB_RESULTS = 3;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
+const MAX_HISTORY_MESSAGES = 5;
 
 const userMessageHistory = Object.create(null);
 
@@ -62,6 +63,18 @@ const cloudOllama = process.env.OLLAMA_API_KEY
 
 function stripBotMention(text) {
     return text.replace(/<@!?\d+>/g, '').trim();
+}
+
+function addMessageToHistory(userId, message) {
+    if (typeof userMessageHistory[userId] === 'undefined') {
+        userMessageHistory[userId] = [];
+    }
+
+    if (userMessageHistory[userId].length >= MAX_HISTORY_MESSAGES) {
+        userMessageHistory[userId].shift();
+    }
+
+    userMessageHistory[userId].push(message);
 }
 
 
@@ -205,11 +218,7 @@ client.on('messageCreate', async (userMsg) => {
     const userMsgText = stripBotMention(userMsg.content);
     if (!userMsgText) return;
 
-    if (typeof userMessageHistory[userId] === 'undefined') {
-        userMessageHistory[userId] = [];
-    }
-
-    userMessageHistory[userId].push({
+    addMessageToHistory(userId, {
         role: 'user',
         content: userMsgText,
     });
@@ -278,7 +287,7 @@ client.on('messageCreate', async (userMsg) => {
 
         await userMsg.reply(replyText);
 
-        userMessageHistory[userId].push({
+        addMessageToHistory(userId, {
             role: 'assistant',
             content: replyText,
         });
