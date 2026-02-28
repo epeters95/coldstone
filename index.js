@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import ollama, { Ollama } from 'ollama';
+import ollama from 'ollama';
 import fs from 'node:fs';
 
 dotenv.config();
@@ -22,6 +22,7 @@ const MAX_WEB_RESULTS = 3;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
 const MAX_HISTORY_MESSAGES = 5;
+const SERP_API_KEY = process.env.SERPAPI_API_KEY;
 
 const userMessageHistory = Object.create(null);
 
@@ -52,15 +53,6 @@ Reminder:
 
 const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
 
-const cloudOllama = process.env.OLLAMA_API_KEY
-    ? new Ollama({
-        host: process.env.OLLAMA_CLOUD_HOST || 'https://ollama.com',
-        headers: {
-            Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
-        },
-    })
-    : null;
-
 function stripBotMention(text) {
     return text.replace(/<@!?\d+>/g, '').trim();
 }
@@ -89,31 +81,30 @@ function limitForDiscord(text) {
 }
 
 function formatWebSearchContext(searchResponse) {
-    if (!searchResponse?.results?.length) {
+    const organicResults = Array.isArray(searchResponse?.organic_results)
+        ? searchResponse.organic_results.slice(0, Math.min(Math.max(MAX_WEB_RESULTS, 1), 10))
+        : [];
+
+    if (!organicResults.length) {
+        if (!searchResponse?.results?.length) {
         return {
-            warning: `Function "${functionName}" returned empty results.`,
+            warning: `Serp API returned empty results.`,
             context: null,
         };
     }
-    
-    const formatted = searchResponse.results.map((result, index) => {
-        if (result !== undefined) {
-            
-            const snippet = (result.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
-            return [
-                `${index + 1}. ${result.title || 'Untitled'}`,
-                `URL: ${result.url || 'N/A'}`,
-                `Snippet: ${snippet || 'No snippet available.'}`,
-            ].join('\n');
-        }
+
+    const formatted = organicResults.map((result, index) => {
+        const snippet = (result?.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+        return [
+            `${index + 1}. ${result?.title || 'Untitled'}`,
+            `URL: ${result?.link || 'N/A'}`,
+            `Snippet: ${snippet || 'No snippet available.'}`,
+        ].join('\n');
     }).join('\n\n');
 
     console.log(`Collected search results: ${formatted}`);
-
-    const today = new Date().toISOString().slice(0, 10);
     return [
-        'Use the web search results below when answering. Prefer recent facts and mention dates when relevant.',
-        'If the results are insufficient, say so.',
+        `Use the web search results below when answering. These results, dated ${new Date().toDateString()} represent current information beyond your knowledge cutoff date to inform accurate answers.`,
         '',
         'WEB SEARCH RESULTS',
         formatted,
@@ -121,9 +112,9 @@ function formatWebSearchContext(searchResponse) {
 }
 
 async function getWebSearchContext(query) {
-    if (!cloudOllama) {
+    if (!SERP_API_KEY) {
         return {
-            warning: 'Web search requested, but OLLAMA_API_KEY is not set. Replying without web search.',
+            warning: 'Web search requested, but SERPAPI_API_KEY is not set. Replying without web search.',
             context: null,
         };
     }
@@ -135,14 +126,30 @@ async function getWebSearchContext(query) {
         };
     }
 
-    const searchResponse = await cloudOllama.webSearch({
-        query,
-        max_results: Math.min(Math.max(MAX_WEB_RESULTS, 1), 10),
-    });
+    const maxResults = Math.min(Math.max(MAX_WEB_RESULTS, 1), 10);
+    const searchUrl = new URL('https://serpapi.com/search');
+    searchUrl.searchParams.set('engine', 'google');
+    searchUrl.searchParams.set('q', query);
+    searchUrl.searchParams.set('num', String(maxResults));
+    searchUrl.searchParams.set('api_key', SERP_API_KEY);
+
+    const response = await fetch(searchUrl.toString());
+    if (!response.ok) {
+        throw new Error(`SerpAPI request failed with ${response.status}`);
+    }
+
+    const searchResponse = await response.json();
+    const context = formatWebSearchContext(searchResponse);
+    if (!context) {
+        return {
+            warning: 'Web search returned no results. Replying without web search.',
+            context: null,
+        };
+    }
 
     return {
         warning: null,
-        context: formatWebSearchContext(searchResponse),
+        context: context,
     };
 }
 
