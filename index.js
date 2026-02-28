@@ -14,48 +14,40 @@ const client = new Client({
     ],
 });
 
-const userMessageHistory = Object.create(null);
+// llama 16k context has about 5 minute reply
+const LOCAL_CHAT_MODEL = 'llama3.2-10k'; // 'llama16k';
+
 const CHAT_HISTORY_PATH = 'chat_history.json';
-const LOCAL_CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL || 'llama3.2';
 const MAX_WEB_RESULTS = 3;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
 
-const SYSTEM_PROMPT = `Cutting Knowledge Date: December 2023
-Today Date: February 26 2026
+const userMessageHistory = Object.create(null);
 
+const SYSTEM_PROMPT = `
 # Tool Instructions
-- You are a helpful personal assistant.
-- When the user includes any of the keywords ("search online","online search","search web","search the web","look up","find online","web search","google","news"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
+- IF the user includes any of the keywords ("search online","online search","search web","search the web","look up","find online","web search","google","news"), use the function 'getWebSearchContext' to get the internet search results for a provided search query.
 - When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request in the context of the conversation.
+- IF there are no search keywords, do not call a function.
 
 You have access to the following functions:
 
-{
-  "name": "getWebSearchContext",
-  "description": "Performs a web search for a single query and returns relevant results.",
-  "parameters": {
-    "query": {
-      "param_type": "string",
-      "description": "the search query string",
-      "required": true
-    },
-  }
-}
+getWebSearchContext(query)
+- Description: Performs a web search for a single query and returns relevant results
+- Parameters: Query (type: string, description: the search query string, required: true)
 
 
-If a you choose to call a function ONLY reply in the following format:
-<function=functionName>{parameters}</function>
+If a you choose to call a function ONLY reply in one of the following formats:
+<function=getWebSearchContext>query</function>
+
 where
-functionName => getWebSearchContext
-parameters => a JSON dict with the function argument name as key and function argument value as value, e.g. {"example_name": "example_value"}
+query => String of the search terms
 
 Reminder:
-- When user is asking for a question that requires your reasoning, DO NOT USE OR FORCE a function call
-- Do not state when a function call is not needed
 - Function calls MUST follow the specified format
-- Required parameters MUST be specified
-- When returning a function call, don't add anything else to your response`;
+- When returning a function call, don't add anything else to your response
+- When user is asking for a question that requires your reasoning, DO NOT USE a function call
+- Do not state when a function call is not needed`;
 
 const TRUNCATION_SUFFIX = '\n\n[Response truncated]';
 
@@ -90,20 +82,23 @@ function formatWebSearchContext(searchResponse) {
             context: null,
         };
     }
-    console.log(`Collected search results: ${JSON.stringify(searchResponse)}`);
-
+    
     const formatted = searchResponse.results.map((result, index) => {
-        const snippet = (result.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
-        return [
-            `${index + 1}. ${result.title || 'Untitled'}`,
-            `URL: ${result.url || 'N/A'}`,
-            `Snippet: ${snippet || 'No snippet available.'}`,
-        ].join('\n');
+        if (result !== undefined) {
+            
+            const snippet = (result.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+            return [
+                `${index + 1}. ${result.title || 'Untitled'}`,
+                `URL: ${result.url || 'N/A'}`,
+                `Snippet: ${snippet || 'No snippet available.'}`,
+            ].join('\n');
+        }
     }).join('\n\n');
+
+    console.log(`Collected search results: ${formatted}`);
 
     const today = new Date().toISOString().slice(0, 10);
     return [
-        `Current date: ${today}.`,
         'Use the web search results below when answering. Prefer recent facts and mention dates when relevant.',
         'If the results are insufficient, say so.',
         '',
@@ -156,10 +151,7 @@ async function extractDetailsAndCallFunction(responseText) {
     argsText = argsText.replace(/<\/function>\s*$/i, '').trim();
 
     const functionMap = {
-        getWebSearchContext: {
-            func: getWebSearchContext,
-            param: "query" //TODO: expand to array
-        }
+        getWebSearchContext: getWebSearchContext
     };
 
     if (!Object.keys(functionMap).includes(functionName) || !argsText) {
@@ -171,22 +163,9 @@ async function extractDetailsAndCallFunction(responseText) {
 
     try {
 
-        // Parse JSON (leaves extendable for multiple params)
-        const parsedArgs = JSON.parse(argsText);
-        
-        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
-            console.error("Wrong argument types");
-            return {
-                warning: `Arguments "${argsText}" were incorrect, so I replied without search results.`,
-                context: null,
-            };
-        }
         console.log(`Calling Function "${functionName}" with arguments "${argsText}"`);
 
-        // Lookup the params defined in functionMap and pass to function
-        // Not the best way to do this (arg names not validated, only functionName)
-        // TODO: find different approach
-        result = await functionMap[functionName].func(parsedArgs[functionMap[functionName].param])
+        const result = await functionMap[functionName](argsText)
         return result;
     
     } catch (error) {
