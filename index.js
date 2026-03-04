@@ -105,7 +105,7 @@ function formatWebSearchContext(searchResponse) {
 
     console.log(`Collected search results: ${formatted}`);
     return [
-        `Use the web search results below, dated ${new Date().toDateString()}, when answering. This current information takes priority over your existing knowledge.`,
+        `Use the web search results below, dated ${new Date().toDateString()}, when answering. This current information takes priority over your existing knowledge. Only answer, and do not call a function.`,
         '',
         'WEB SEARCH RESULTS',
         formatted,
@@ -235,8 +235,6 @@ client.on('messageCreate', async (userMsg) => {
         let webSearchWarning = null;
         let webSearchContext = null;
         
-        console.log(`Using chat history: ${JSON.stringify(userMessageHistory)}`);
-        
         // First chat generation (response or function call)
 
         const initialReply = await ollama.chat({
@@ -267,7 +265,8 @@ client.on('messageCreate', async (userMsg) => {
             const finalMessages = webSearchContext
                 ? [
                     { role: 'system', content: webSearchContext },
-                    ...userMessageHistory[userId],
+                    ...(userMessageHistory[userId]
+                        .slice(1, userMessageHistory[userId].length)),
                 ]
                 : userMessageHistory[userId];
 
