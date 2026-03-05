@@ -48,8 +48,7 @@ where
 query => The search terms
 
 Reminder:
-- When user is asking for a question that requires your reasoning, DO NOT USE a function call.
-- When the user didn't specify search keywords, DO NOT USE getWebSearchContext!
+- Only use a function call if the user specified search keywords, otherwise DO NOT USE getWebSearchContext!
 - Function calls MUST be on one line, follow the specified format, and contain nothing else in the response.
 - When a function call isn't needed, don't mention it at all.`;
 
@@ -105,7 +104,7 @@ function formatWebSearchContext(searchResponse) {
 
     console.log(`Collected search results: ${formatted}`);
     return [
-        `Use the web search results below, dated ${new Date().toDateString()}, when answering. This current information takes priority over your existing knowledge. Only answer, and do not call a function.`,
+        `When answering, use the web search results below from today (${new Date().toDateString()}). This current information takes priority over your existing knowledge.`,
         '',
         'WEB SEARCH RESULTS',
         formatted,
