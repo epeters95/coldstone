@@ -235,7 +235,7 @@ client.on('messageCreate', async (userMsg) => {
         
         // First chat generation (response or function call)
 
-        userMsg.chanel.sendTyping()
+        userMsg.channel.sendTyping()
 
         const initialReply = await ollama.chat({
             model: LOCAL_CHAT_MODEL,
@@ -274,7 +274,7 @@ client.on('messageCreate', async (userMsg) => {
 
             // Generate response from search results
 
-            userMsg.chanel.sendTyping()
+            userMsg.channel.sendTyping()
 
             const finalReply = await ollama.chat({
                 model: LOCAL_CHAT_MODEL,
