@@ -18,11 +18,11 @@ const client = new Client({
 const LOCAL_CHAT_MODEL = 'llama3.2-10k'; // 'llama16k';
 
 const CHAT_HISTORY_PATH = 'chat_history.json';
-const MAX_WEB_RESULTS = 3;
+const MAX_WEB_RESULTS = 5;
 const DISCORD_MAX_MESSAGE_CHARS = 2000;
 const MAX_REPLY_TOKENS = 350;
 const MAX_HISTORY_MESSAGES = 5;
-const SERP_API_KEY = process.env.SERPAPI_API_KEY;
+const SERP_API_KEY = process.env.SERP_API_KEY;
 
 const userMessageHistory = Object.create(null);
 
@@ -48,8 +48,7 @@ where
 query => The search terms
 
 Reminder:
-- When user is asking for a question that requires your reasoning, DO NOT USE a function call.
-- When the user didn't specify search keywords, DO NOT USE getWebSearchContext!
+- Only use a function call if the user specified search keywords, otherwise DO NOT USE getWebSearchContext!
 - Function calls MUST be on one line, follow the specified format, and contain nothing else in the response.
 - When a function call isn't needed, don't mention it at all.`;
 
@@ -104,7 +103,7 @@ function formatWebSearchContext(searchResponse) {
 
     console.log(`Collected search results: ${formatted}`);
     return [
-        `Use the web search results below when answering. These results, dated ${new Date().toDateString()} represent current information beyond your knowledge cutoff date to inform accurate answers.`,
+        `When answering, use the web search results below from today (${new Date().toDateString()}). This current information takes priority over your existing knowledge.`,
         '',
         'WEB SEARCH RESULTS',
         formatted,
@@ -234,8 +233,6 @@ client.on('messageCreate', async (userMsg) => {
         let webSearchWarning = null;
         let webSearchContext = null;
         
-        console.log(`Using chat history: ${JSON.stringify(userMessageHistory)}`);
-        
         // First chat generation (response or function call)
 
         userMsg.chanel.sendTyping()
@@ -270,7 +267,8 @@ client.on('messageCreate', async (userMsg) => {
             const finalMessages = webSearchContext
                 ? [
                     { role: 'system', content: webSearchContext },
-                    ...userMessageHistory[userId],
+                    ...(userMessageHistory[userId]
+                        .slice(1, userMessageHistory[userId].length)),
                 ]
                 : userMessageHistory[userId];
 
