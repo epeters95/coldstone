@@ -89,10 +89,8 @@ function formatWebSearchContext(searchResponse) {
 
     if (!organicResults.length) {
         if (!searchResponse?.results?.length) {
-        return {
-            warning: `Serp API returned empty results.`,
-            context: null,
-        };
+            return null;
+        }
     }
 
     const formatted = organicResults.map((result, index) => {
@@ -240,6 +238,8 @@ client.on('messageCreate', async (userMsg) => {
         
         // First chat generation (response or function call)
 
+        userMsg.chanel.sendTyping()
+
         const initialReply = await ollama.chat({
             model: LOCAL_CHAT_MODEL,
             messages: [
@@ -257,6 +257,8 @@ client.on('messageCreate', async (userMsg) => {
 
         if (replyText.trimStart().startsWith('<function=')) {
 
+            userMsg.react('🔍');
+
             // Collect search results
             const functionResult = await extractDetailsAndCallFunction(
                 replyText
@@ -273,6 +275,8 @@ client.on('messageCreate', async (userMsg) => {
                 : userMessageHistory[userId];
 
             // Generate response from search results
+
+            userMsg.chanel.sendTyping()
 
             const finalReply = await ollama.chat({
                 model: LOCAL_CHAT_MODEL,
