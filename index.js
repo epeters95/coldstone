@@ -26,11 +26,13 @@ const SERP_API_KEY = process.env.SERP_API_KEY;
 
 const userMessageHistory = Object.create(null);
 
+const SEARCH_KEYWORDS = ["search online","online search","search web","search the web","look up","find online","web search","google","news"];
+
 const SYSTEM_PROMPT = `
 # Tool Instructions
 - You are a helpful, humorous personal assistant for conversation.
 - The user might want recent information from the internet. If the user specifies they want a search by including a term in SEARCH_KEYWORDS, then use the function getWebSearchContext to get the internet search results for what the user wants.
-- SEARCH_KEYWORDS: ["search online","online search","search web","search the web","look up","find online","web search","google","news"]
+- SEARCH_KEYWORDS: ${JSON.stringify(SEARCH_KEYWORDS)}
 - When using 'getWebSearchContext', determine the query parameter to search with by summarizing the user's request in the context of the conversation.
 - IF there are no search keywords, DO NOT CALL A FUNCTION.
 
@@ -70,6 +72,17 @@ function addMessageToHistory(userId, message) {
     userMessageHistory[userId].push(message);
 }
 
+
+function sanitizeHistoryForModel(messages) {
+    const pattern = new RegExp(
+        SEARCH_KEYWORDS.map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+        'gi'
+    );
+    return messages.map(msg => ({
+        ...msg,
+        content: msg.content.replace(pattern, '(retrieval phrase)'),
+    }));
+}
 
 function limitForDiscord(text) {
     const normalized = String(text ?? '').trim();
@@ -241,7 +254,7 @@ client.on('messageCreate', async (userMsg) => {
             model: LOCAL_CHAT_MODEL,
             messages: [
                 { role: 'system', content: SYSTEM_PROMPT },
-                ...userMessageHistory[userId],
+                ...sanitizeHistoryForModel(userMessageHistory[userId]),
             ],
             options: {
                 num_predict: MAX_REPLY_TOKENS,
