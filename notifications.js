@@ -6,7 +6,8 @@ import ollama from 'ollama';
 
 const NOTIFICATIONS_CONFIG_PATH = 'notifications.json';
 const SENT_HISTORY_PATH = 'sent_history.json';
-const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'];
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.heic', '.heif'];
+const HEIC_EXTENSIONS = ['.heic', '.heif'];
 
 // --- CSV parsing ---
 
@@ -118,6 +119,22 @@ function getExifData(imagePath) {
     return exif;
 }
 
+// --- HEIC to JPEG conversion ---
+
+function convertHeicToJpeg(imagePath) {
+    const ext = path.extname(imagePath).toLowerCase();
+    if (!HEIC_EXTENSIONS.includes(ext)) return imagePath;
+
+    const jpegPath = imagePath.replace(/\.[^.]+$/, '.jpg');
+    if (fs.existsSync(jpegPath)) return jpegPath;
+    try {
+        execSync(`magick "${imagePath}" "${jpegPath}" 2>/dev/null`);
+    } catch {
+        execSync(`convert "${imagePath}" "${jpegPath}"`);
+    }
+    return jpegPath;
+}
+
 // --- Sent history tracking ---
 
 function loadSentHistory() {
@@ -225,12 +242,15 @@ async function executeNotification(notification, client) {
     const allNotes = loadNotes(csvPath);
     const notes = allNotes[filename] || '';
 
-    // Extract EXIF metadata
+    // Extract EXIF metadata before any conversion (conversion can strip it)
     const exifData = getExifData(imagePath);
+
+    // Convert HEIC to JPEG if needed
+    const sendPath = convertHeicToJpeg(imagePath);
 
     // Generate description with vision model
     const description = await generateDescription(
-        imagePath,
+        sendPath,
         notes,
         exifData,
         model || 'qwen3-vl-10k',
@@ -239,7 +259,7 @@ async function executeNotification(notification, client) {
     // Send to Discord
     await channel.send({
         content: description,
-        files: [imagePath],
+        files: [sendPath],
     });
 
     console.log(`[notifications] "${name}": sent ${filename} to channel ${channelId}`);
