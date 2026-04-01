@@ -1,0 +1,10 @@
+[
+  {
+    "name": "daily-photo",
+    "folder": "/path/to/photos",
+    "channelId": "YOUR_CHANNEL_ID",
+    "time": "12:00",
+    "notesFile": "notes.csv",
+    "model": "qwen3-vl-10k"
+  }
+]

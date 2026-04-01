@@ -1,4 +1,4 @@
 {
     "verbose": true,
-    "ignore": ["chat_history.json"]
+    "ignore": ["chat_history.json", "sent_history.json"]
 }

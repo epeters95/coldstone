@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import ollama from 'ollama';
 import fs from 'node:fs';
+import { initNotifications } from './notifications.js';
 
 dotenv.config();
 
@@ -215,14 +216,17 @@ client.once(Events.ClientReady, (readyClient) => {
 
     // Load chat history
     try {
-        
+
         Object.assign(userMessageHistory, JSON.parse(fs.readFileSync(CHAT_HISTORY_PATH, 'utf8')))
-        
+
     } catch (error) {
-        
+
         console.error('Error loading history file ' + CHAT_HISTORY_PATH)
 
     }
+
+    // Start scheduled notifications
+    initNotifications(client);
 });
 
 client.login(process.env.DISCORD_TOKEN);
